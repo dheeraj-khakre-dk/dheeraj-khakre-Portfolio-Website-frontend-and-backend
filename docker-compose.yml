@@ -1,0 +1,89 @@
+version: '3.8'
+
+services:
+  # ==========================================
+  # Relational Database: PostgreSQL 16
+  # ==========================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: dheeraj-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: dheeraj_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d dheeraj_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - portfolio-network
+
+  # ==========================================
+  # Java Spring Boot 3 Backend API
+  # ==========================================
+  spring-boot-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: dheeraj-spring-backend
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/dheeraj_db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgrespassword
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      CORS_ALLOWED_ORIGINS: http://localhost:3000,https://localhost:3000
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - portfolio-network
+
+  # ==========================================
+  # Web Application & HTTPS Reverse Proxy
+  # ==========================================
+  web-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dheeraj-portfolio-web
+    restart: always
+    depends_on:
+      - spring-boot-backend
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      APP_URL: ${APP_URL:-http://localhost:3000}
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - portfolio-network
+
+networks:
+  portfolio-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
